@@ -1,4 +1,3 @@
-import logging
 import sys
 import asyncio
 import aiohttp
