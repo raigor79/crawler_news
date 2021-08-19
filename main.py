@@ -2,6 +2,8 @@ import sys
 import asyncio
 import aiohttp
 from loguru import logger
+import aiofiles
+from bs4 import BeautifulSoup
 
 
 OK = 200
@@ -74,6 +76,11 @@ async def main(par):
             par['language']
         )
         text_page = await fetch_page(client, url_news)
+        BeautifulSoup()
+        filename = 'page.html'
+        async with aiofiles.open(filename, 'wt') as file:
+            await file.write(text_page)
+
 
 
 if __name__ == "__main__":
