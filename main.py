@@ -1,5 +1,7 @@
+import re
 import sys
 import asyncio
+from aiofiles.threadpool import text
 import aiohttp
 from loguru import logger
 import aiofiles
@@ -29,6 +31,7 @@ parametrs_parser = {
     'region': 'US'    
 }
 
+template_article = r'./articles/.+'
 
 logger.add(
         sys.stderr, 
@@ -38,11 +41,18 @@ logger.add(
         )
 
 
-def parsing_page(text: str) -> list[str]:
-    ...
+def parsing_page(text: str) -> set[str]:
+    soup = BeautifulSoup(text, 'html.parser')
+    refs = set()
+    for link in soup.find_all('a'):
+        ref = link.get('href')       
+        if re.match(template_article, str(ref)):
+            refs.add(ref)
+    print(refs, len(refs))
+    return refs
 
 
-async def fetch_page(client, url):
+async def fetch_page(client: aiohttp.ClientSession, url: text) -> text:
     try:
         async with client.get(url) as resp:
             if resp.status in (OK,):
@@ -76,7 +86,8 @@ async def main(par):
             par['language']
         )
         text_page = await fetch_page(client, url_news)
-        BeautifulSoup()
+        url_line_news = parsing_page(text_page)
+        
         filename = 'page.html'
         async with aiofiles.open(filename, 'wt') as file:
             await file.write(text_page)
