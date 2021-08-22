@@ -1,4 +1,5 @@
 import re
+import os
 import sys
 import asyncio
 from aiofiles.threadpool import text
@@ -8,22 +9,7 @@ import aiofiles
 from bs4 import BeautifulSoup
 
 
-OK = 200
-BAD_REQUEST = 400
-FORBIDDEN = 403
-NOT_FOUND = 404
-INVALID_REQUEST = 422
-INTERNAL_ERROR = 500
-ERRORS = {
-    OK: "Error have been not",
-    BAD_REQUEST: "Bad Request",
-    FORBIDDEN: "Forbidden",
-    NOT_FOUND: "Not Found",
-    INVALID_REQUEST: "Invalid Request",
-    INTERNAL_ERROR: "Internal Server Error",
-}
-
-
+USER_AGENT = 'Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:64.0) Gecko/20100101 Firefox/64.0'
 parametrs_parser = {
     'key_word': 'Russia',
     'language': 'en',
@@ -33,12 +19,34 @@ parametrs_parser = {
 
 template_article = r'./articles/.+'
 
+
 logger.add(
         sys.stderr, 
         format="{time} {level} {message}", 
         filter="my_module", 
         level="INFO"
         )
+
+
+def make_dir(path):
+    """ Directories creation function
+    arguments:
+    path - full path make directory
+    """
+    if not os.path.isdir(path):
+        try:
+            os.makedirs(path)
+        except OSError:
+            logger.error("Create directories {} failed".format(path))
+
+
+
+
+
+async def save_page_news(path_dir: str, file_name: str, text_page: text)-> None:
+    make_dir(path_dir)
+    async with aiofiles.open(file_name, 'wt') as file:
+            await file.write(text_page)
 
 
 def parsing_page(text: str) -> set[str]:
@@ -55,26 +63,24 @@ def parsing_page(text: str) -> set[str]:
 async def fetch_page(client: aiohttp.ClientSession, url: text) -> text:
     try:
         async with client.get(url) as resp:
-            if resp.status in (OK,):
-                logger.info(
-                    f'Page {url[:20]}... loaded, status response = {resp.status} : {ERRORS[resp.status]}'
-                    )
-                home_page_text = await resp.text()
-            else:
-                logger.info(
-                    f'Page {url[:20]}... is not loaded, status error {resp.status} : {ERRORS[resp.status]}'
-                    )
+            buffer = b''
+            async for dline, _ in resp.content.iter_chunks():
+                buffer += dline
+            data = buffer[:]
     except Exception:
         pass
-    return home_page_text
+    return str(data)
+
+
+def create_header_request(user_agent: str=USER_AGENT, language: str='en', region: str='US')->dict:
+    accept_language = language + '-' + region + ',' + language + ';q=0.9'
+    return {'User-Agent': user_agent, 'Accept-Language': accept_language}
 
 
 async def main(par):
     timeout = aiohttp.ClientTimeout(total=30)
-    conn = aiohttp.TCPConnector(limit_per_host=30)
-    user_agent = 'Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:64.0) Gecko/20100101 Firefox/64.0'
-    accept_language= par['language'] + '-' + par['region'] + ',' + par['language'] + ';q=0.9'
-    header_request = {'User-Agent': user_agent, 'Accept-Language': accept_language}
+    conn = aiohttp.TCPConnector(limit_per_host=30)   
+    header_request = create_header_request()
     async with aiohttp.ClientSession(
         timeout=timeout, 
         connector=conn,
@@ -86,12 +92,7 @@ async def main(par):
             par['language']
         )
         text_page = await fetch_page(client, url_news)
-        url_line_news = parsing_page(text_page)
-        
-        filename = 'page.html'
-        async with aiofiles.open(filename, 'wt') as file:
-            await file.write(text_page)
-
+        url_line_news = parsing_page(text_page)        
 
 
 if __name__ == "__main__":
