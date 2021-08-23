@@ -1,14 +1,17 @@
-from asyncio.tasks import sleep
-from datetime import time
 import re
 import os
 import sys
 import asyncio
-from aiofiles.threadpool import text
+from datetime import datetime, timedelta
 import aiohttp
 from loguru import logger
 import aiofiles
+from aiofiles.threadpool import text
 from bs4 import BeautifulSoup
+from tqdm import tqdm
+import numpy as np
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
 
 
 USER_AGENT = 'Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:64.0) Gecko/20100101 Firefox/64.0'
@@ -30,10 +33,6 @@ logger.add(
 
 
 def make_dir(path: str) -> None:
-    """ Directories creation function
-    arguments:
-    path - full path make directory
-    """
     if not os.path.isdir(path):
         try:
             os.makedirs(path)
@@ -47,13 +46,34 @@ async def save_page_news(path_dir: str, file_name: str, text_page: text) -> None
             await file.write(text_page)
 
 
+def parsing_text_by_param(html_text: text, param: str='html.parser'):
+    page = BeautifulSoup(str(html_text), param)
+    return page
+
+
 def parsing_page(text: str) -> set[str]:
-    soup = BeautifulSoup(text, 'html.parser')
+    soup = parsing_text_by_param(text)
     refs = set()
-    for link in soup.find_all('a'):
-        ref = link.get('href')       
-        if re.match(template_article, str(ref)):
-            refs.add(ref)
+    for link in soup.body.findAll('article'):
+        date = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+        url = r"(href=\"\.)(/[\S]*)(\" )"
+        
+        string_date_publication = re.search(date, str(link))
+        date_pub = datetime.strptime(string_date_publication.group(), "%Y-%m-%dT%H:%M:%SZ")
+        date_now = datetime.now()
+        
+        if date_now.month == 1:
+            year = date_now.year - 1
+            month = 12
+        else: 
+            year = date_now.year
+            month = date_now.month - 1
+            
+        date_old = datetime(year=year, month=month, day=date_now.day)
+        if date_pub > date_old:
+            publication = re.search(url, str(link))
+
+            refs.add(publication.groups()[1])
     return refs
 
 
@@ -70,7 +90,7 @@ async def fetch_page(client: aiohttp.ClientSession, url: text) -> text:
     return data
 
 
-def generate_name_file(url):
+def generate_name_file_from_url(url: str) -> str:
     simbs = [ '\\', '/', ':', '*', '?', '"', '<', '>', '|', '+', '!', '%', '@', '~', '-']
     for simb in simbs:
         if simb in url:
@@ -80,24 +100,62 @@ def generate_name_file(url):
 
 
 async def load_news_pages(client, root_page: str, resl: set) -> None:
-    tasks_load = []
-    tasks_reload = []
-    for index, value in enumerate(resl):
-        tasks_load.append(asyncio.create_task(fetch_page(client, root_page + str(value[1:]))))
-        html_text = await tasks_load[index]
-        
-        page = BeautifulSoup(str(html_text), 'html.parser')
-        url = str(page.body.findAll('a')[-1].get('href'))
-        tasks_reload.append(asyncio.create_task(fetch_page(client, url)))
-        logger.info(f'{index} - {url}')
-        html_text = await tasks_reload[index]
-        await save_page_news('./new', str(index) + generate_name_file(url) +'.html', html_text)
-    await asyncio.gather(*tasks_load, *tasks_reload)
+    tasks_load, tasks_reload = [], []
+    html_texts, urls = [], []
+    for index, value in tqdm(enumerate(resl)):
+        tasks_load.append(
+            asyncio.create_task(
+                fetch_page(
+                    client, 
+                    root_page + str(value)
+                    )
+                )
+            )
+        html_texts.append(await tasks_load[index])       
+    await asyncio.gather(*tasks_load)
 
-        
+    logger.info(f'Pre-Loaded {len(html_texts)} refs')
+
+    for html_text in tqdm(html_texts):
+        page = parsing_text_by_param(html_text.decode('utf-8'))
+        urls.append(str(page.body.findAll('a')[-1].get('href')))
+            
+    html_texts = []
+    for index, url in tqdm(enumerate(urls)):
+        tasks_reload.append(asyncio.create_task(fetch_page(client, url)))        
+        html_texts.append(await tasks_reload[index])
+        await save_page_news(
+            './news', str(index) + generate_name_file_from_url(url) + '.html', 
+            html_texts[index]
+            )
+    await asyncio.gather(*tasks_reload)
+    
+    logger.info(f'Loaded {len(html_texts)} news refs')
+
+    titles = []
+    for html_text in tqdm(html_texts):
+        page = parsing_text_by_param(html_text.decode('utf-8'))
+        if text := page.title:
+            match = re.search(r'^.*(?=[-,|])', text.string)
+            if match:
+                titles.append(match[0])
+    return '.\n'.join([string.rstrip() for string in titles])
+
+               
 def create_header_request(user_agent: str=USER_AGENT, language: str='en', region: str='US') -> dict:
     accept_language = language + '-' + region + ',' + language + ';q=0.9'
     return {'User-Agent': user_agent, 'Accept-Language': accept_language}
+
+
+def generate_wordcloud(text_: text) -> None:
+    x, y = np.ogrid[:300, :300]
+    mask = (x - 150) ** 2 + (y - 150) ** 2 > 130 ** 2
+    mask = 255 * mask.astype(int)
+    wc = WordCloud(background_color="white", repeat=True, mask=mask, max_words=50, min_word_length=4)
+    wc.generate(text_)
+    plt.axis("off")
+    plt.imshow(wc, interpolation="bilinear")
+    plt.show() 
 
 
 async def main(par: dict) -> None:
@@ -115,10 +173,11 @@ async def main(par: dict) -> None:
             par['language']
         )
         text_page = await fetch_page(client, url_news)
-        url_line_news = parsing_page(str(text_page))
-        
-        await load_news_pages(client, 'https://news.google.com', url_line_news)        
+        url_line_news = parsing_page(text_page.decode('utf-8'))
 
+        text_ = await load_news_pages(client, 'https://news.google.com', url_line_news)
+    generate_wordcloud(text_)
+ 
 
 if __name__ == "__main__":
     logger.info('Start - >')
