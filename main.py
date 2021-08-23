@@ -1,3 +1,5 @@
+from asyncio.tasks import sleep
+from datetime import time
 import re
 import os
 import sys
@@ -16,7 +18,6 @@ parametrs_parser = {
     'period': '1y',
     'region': 'US'    
 }
-
 template_article = r'./articles/.+'
 
 
@@ -28,7 +29,7 @@ logger.add(
         )
 
 
-def make_dir(path):
+def make_dir(path: str) -> None:
     """ Directories creation function
     arguments:
     path - full path make directory
@@ -40,12 +41,9 @@ def make_dir(path):
             logger.error("Create directories {} failed".format(path))
 
 
-
-
-
-async def save_page_news(path_dir: str, file_name: str, text_page: text)-> None:
+async def save_page_news(path_dir: str, file_name: str, text_page: text) -> None:
     make_dir(path_dir)
-    async with aiofiles.open(file_name, 'wt') as file:
+    async with aiofiles.open(path_dir + '/' + file_name, 'wb') as file:
             await file.write(text_page)
 
 
@@ -56,11 +54,11 @@ def parsing_page(text: str) -> set[str]:
         ref = link.get('href')       
         if re.match(template_article, str(ref)):
             refs.add(ref)
-    print(refs, len(refs))
     return refs
 
 
 async def fetch_page(client: aiohttp.ClientSession, url: text) -> text:
+    data = b''
     try:
         async with client.get(url) as resp:
             buffer = b''
@@ -69,16 +67,41 @@ async def fetch_page(client: aiohttp.ClientSession, url: text) -> text:
             data = buffer[:]
     except Exception:
         pass
-    return str(data)
+    return data
 
 
-def create_header_request(user_agent: str=USER_AGENT, language: str='en', region: str='US')->dict:
+def generate_name_file(url):
+    simbs = [ '\\', '/', ':', '*', '?', '"', '<', '>', '|', '+', '!', '%', '@', '~', '-']
+    for simb in simbs:
+        if simb in url:
+            url = url.replace(simb, '')
+    len_name_file = 60  if len(url) > 60 else len(url)
+    return url[:len_name_file]
+
+
+async def load_news_pages(client, root_page: str, resl: set) -> None:
+    tasks_load = []
+    tasks_reload = []
+    for index, value in enumerate(resl):
+        tasks_load.append(asyncio.create_task(fetch_page(client, root_page + str(value[1:]))))
+        html_text = await tasks_load[index]
+        
+        page = BeautifulSoup(str(html_text), 'html.parser')
+        url = str(page.body.findAll('a')[-1].get('href'))
+        tasks_reload.append(asyncio.create_task(fetch_page(client, url)))
+        logger.info(f'{index} - {url}')
+        html_text = await tasks_reload[index]
+        await save_page_news('./new', str(index) + generate_name_file(url) +'.html', html_text)
+    await asyncio.gather(*tasks_load, *tasks_reload)
+
+        
+def create_header_request(user_agent: str=USER_AGENT, language: str='en', region: str='US') -> dict:
     accept_language = language + '-' + region + ',' + language + ';q=0.9'
     return {'User-Agent': user_agent, 'Accept-Language': accept_language}
 
 
-async def main(par):
-    timeout = aiohttp.ClientTimeout(total=30)
+async def main(par: dict) -> None:
+    timeout = aiohttp.ClientTimeout(total=15)
     conn = aiohttp.TCPConnector(limit_per_host=30)   
     header_request = create_header_request()
     async with aiohttp.ClientSession(
@@ -92,7 +115,9 @@ async def main(par):
             par['language']
         )
         text_page = await fetch_page(client, url_news)
-        url_line_news = parsing_page(text_page)        
+        url_line_news = parsing_page(str(text_page))
+        
+        await load_news_pages(client, 'https://news.google.com', url_line_news)        
 
 
 if __name__ == "__main__":
