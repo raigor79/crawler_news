@@ -33,6 +33,9 @@ logger.add(
         )
 
 
+class ValidationError(Exception):...
+
+
 def make_dir(path: str) -> None:
     if not os.path.isdir(path):
         try:
@@ -62,7 +65,7 @@ def check_date_publication(date: str, last_period: Union[int, str]=30, date_form
     try:
         date_pub = datetime.strptime(date, date_format)    
     except TypeError:
-        raise 'Error transform date'   
+        raise ValidationError('Error transform date')  
     if isinstance(last_period, int):
         return True if 0 <= (date_now - date_pub).days <= last_period else False
     range_date = timedelta(days=period[last_period])
