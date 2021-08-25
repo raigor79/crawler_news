@@ -2,7 +2,8 @@ import re
 import os
 import sys
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
+from typing import Optional, Union
 import aiohttp
 from loguru import logger
 import aiofiles
@@ -51,29 +52,37 @@ def parsing_text_by_param(html_text: text, param: str='html.parser'):
     return page
 
 
+def check_date_publication(date: str, last_period: Union[int, str]=30, date_format: str="%Y-%m-%dT%H:%M:%SZ") -> True:
+    """function to check date publication, it includes or not at last period in days.
+    date - must be string in format date_format
+    last_period - must be integer, number of days or str ['day', 'month', 'year'] 
+    """
+    period = {'year': 365, 'month': 30, 'day': 1}    
+    date_now = datetime.now()
+    try:
+        date_pub = datetime.strptime(date, date_format)    
+    except TypeError:
+        raise 'Error transform date'   
+    if isinstance(last_period, int):
+        return True if 0 <= (date_now - date_pub).days <= last_period else False
+    range_date = timedelta(days=period[last_period])
+    date_boarder = date_now - range_date
+    if last_period in ('year', 'month'):
+        date_boarder.day = date_now.day
+    return True if  date_boarder <= date_pub <= date_now else False
+
+
 def parsing_page(text: str) -> set[str]:
     soup = parsing_text_by_param(text)
     refs = set()
     for link in soup.body.findAll('article'):
         date = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
-        url = r"(href=\"\.)(/[\S]*)(\" )"
-        
+        url = r"(href=\"\.)(/[\S]*)(\" )"        
         string_date_publication = re.search(date, str(link))
-        date_pub = datetime.strptime(string_date_publication.group(), "%Y-%m-%dT%H:%M:%SZ")
-        date_now = datetime.now()
-        
-        if date_now.month == 1:
-            year = date_now.year - 1
-            month = 12
-        else: 
-            year = date_now.year
-            month = date_now.month - 1
-            
-        date_old = datetime(year=year, month=month, day=date_now.day)
-        if date_pub > date_old:
+        if check_date_publication(string_date_publication.group()):
             publication = re.search(url, str(link))
-
             refs.add(publication.groups()[1])
+
     return refs
 
 
@@ -122,6 +131,7 @@ async def load_news_pages(client, root_page: str, resl: set) -> None:
             
     html_texts = []
     for index, url in tqdm(enumerate(urls)):
+        logger.info(url)
         tasks_reload.append(asyncio.create_task(fetch_page(client, url)))        
         html_texts.append(await tasks_reload[index])
         await save_page_news(
@@ -159,7 +169,7 @@ def generate_wordcloud(text_: text) -> None:
 
 
 async def main(par: dict) -> None:
-    timeout = aiohttp.ClientTimeout(total=15)
+    timeout = aiohttp.ClientTimeout(total=1)
     conn = aiohttp.TCPConnector(limit_per_host=30)   
     header_request = create_header_request()
     async with aiohttp.ClientSession(
