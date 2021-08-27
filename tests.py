@@ -1,7 +1,33 @@
 import pytest
 import functools
-from main import check_date_publication
 
+from main import check_date_publication, parsing_page
+
+html_text = '''
+<!DOCTYPE html>
+<html>
+ <head>
+  <meta charset="utf-8" />
+  <title>HTML5</title>
+  <!--[if IE]>
+   <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+  <![endif]-->
+  <style>
+   article, aside, details, figcaption, figure, footer,header,
+   hgroup, menu, nav, section { display: block; }
+  </style>
+ </head>
+ <body>
+  <p>Привет, мир</p>
+  <a href="./html5shiv.googlecode.com/svn/trunk/html5.com" datatime='2021-08-10T13:13:13Z'>
+   123
+  </a>
+  <a href="./html5shiv.googlecode.com/svn/trunk/html5.com" datatime='2021-08-10T13:13:13Z'>
+  '2021-08-10T13:13:13Z' 
+  </a> 
+ </body>
+</html>
+'''
 
 def case_for_tests(cases):
     def decorator(f):
@@ -31,5 +57,9 @@ def test_check_dste_publication_false(cases_):
     assert check_date_publication(cases_) == False
 
 
+def test_parsed_page():
+    assert parsing_page(str(html_text), par_search='a') == set('http://html5shiv.googlecode.com/svn/trunk/html5.com',)
+
+
 if __name__ == "__main__":
-    ...
+    print(parsing_page(html_text, par_search='a'))

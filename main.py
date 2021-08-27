@@ -13,6 +13,7 @@ from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
+from yarl import URL
 
 
 USER_AGENT = 'Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:64.0) Gecko/20100101 Firefox/64.0'
@@ -75,17 +76,19 @@ def check_date_publication(date: str, last_period: Union[int, str]=30, date_form
     return True if  date_boarder <= date_pub <= date_now else False
 
 
-def parsing_page(text: str) -> set[str]:
+DATE_TEMP = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z'
+URL_TEMP = r'(href=\"\.)(/[\S]*)(\" )'
+PAR_SEARCH = 'article'
+
+def parsing_page(text: str, date: str=DATE_TEMP, url: str=URL_TEMP, par_search: str=PAR_SEARCH) -> set[str]:
     soup = parsing_text_by_param(text)
     refs = set()
-    for link in soup.body.findAll('article'):
-        date = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
-        url = r"(href=\"\.)(/[\S]*)(\" )"        
-        string_date_publication = re.search(date, str(link))
-        if check_date_publication(string_date_publication.group()):
-            publication = re.search(url, str(link))
-            refs.add(publication.groups()[1])
-
+    if links := soup.findAll(par_search):
+        for link in links:              
+            string_date_publication = re.search(date, str(link))
+            if check_date_publication(string_date_publication.group()):
+                if publication := re.search(url, str(link)):
+                    refs.add(publication.groups()[1])
     return refs
 
 
@@ -133,6 +136,7 @@ async def load_news_pages(client, root_page: str, resl: set) -> None:
         urls.append(str(page.body.findAll('a')[-1].get('href')))
             
     html_texts = []
+
     for index, url in tqdm(enumerate(urls)):
         logger.info(url)
         tasks_reload.append(asyncio.create_task(fetch_page(client, url)))        

@@ -1,2 +1,4 @@
 /venv
 /news
+__pycache__/main.cpython-39.pyc
+__pycache__/tests.cpython-39-pytest-6.2.4.pyc
